@@ -1,5 +1,5 @@
 # rust-base62
-A simple library base62 encode/decode.
+A simple library base62 encode/decode, no dependencies other libraries.
 
 # Alphabet
 It supports the standard `[0-9A-Za-z]` : [https://en.wikipedia.org/wiki/Base62](https://en.wikipedia.org/wiki/Base62)

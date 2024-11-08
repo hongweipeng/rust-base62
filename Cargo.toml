@@ -1,6 +1,6 @@
 [package]
 name = "rust-base62"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = [
     "Weipeng Hong <hongweichen8888@sina.com>",
@@ -10,7 +10,6 @@ homepage = "https://github.com/hongweipeng/rust-base62"
 repository = "https://github.com/hongweipeng/rust-base62"
 documentation = "https://github.com/hongweipeng/rust-base62"
 readme = "README.md"
-description = "A simple library base62 encode/decode."
+description = "A simple library base62 encode/decode, no dependencies other libraries."
 
 [dependencies]
-lazy_static = "1.5.0"
