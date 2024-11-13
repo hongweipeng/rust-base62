@@ -1,4 +1,11 @@
+//  standard 62-encoding, with a 32-byte input block and, a
+// 43-byte output block.
+const BASE256BLOCK_LEN: usize = 32;
+const BASE62BLOCK_LEN: usize = 43;
+const BASE62_LOG2: f64 = 5.954196310386875; // the result of `62f64.log2()`
+
 const ALPHABET_SIZE: usize = 62;
+
 const ALPHABET: [char; ALPHABET_SIZE] = [
     '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I',
     'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'a', 'b',
@@ -28,91 +35,201 @@ const ALPHABET_VERT: [u8; 256] = [
     255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
 ];
 
+fn encode_len(n: usize) -> usize {
+    if n == BASE256BLOCK_LEN {
+        return BASE62BLOCK_LEN;
+    }
+    let n_block = n / BASE256BLOCK_LEN;
+    let mut out = n_block * BASE62BLOCK_LEN;
+    let rem = n % BASE256BLOCK_LEN;
+    if rem > 0 {
+        out += ((rem * 8) as f64 / BASE62_LOG2).ceil() as usize;
+    }
+    out
+}
+
+fn decode_len(n: usize) -> usize {
+    let n_block = n / BASE62BLOCK_LEN;
+    let mut out = n_block * BASE256BLOCK_LEN;
+    let rem = n % BASE62BLOCK_LEN;
+    if rem > 0 {
+        out += (rem as f64 * BASE62_LOG2 / 8f64).floor() as usize;
+    }
+    out
+}
+
+fn is_valid_encoding_length(n: usize) -> bool {
+    fn f(x: usize) -> usize {
+        ((x as f64) * BASE62_LOG2 / 8f64).floor() as usize
+    }
+    f(n) != f(n - 1)
+}
+
 pub fn encode(src: &[u8]) -> String {
     if src.is_empty() {
         return "".to_string();
     }
-    let cap = ((256f64.log2() * src.len() as f64) / (ALPHABET_SIZE as f64).log2()).ceil() as usize;
+    let mut rs: usize = 0;
+    let cap = encode_len(src.len());
     let mut dst = vec![0u8; cap];
-    for &b in src.iter() {
+    for b in src.iter().copied() {
+        let mut c: usize = 0;
         let mut carry = b as usize;
         for j in (0..cap).rev() {
-            if carry == 0 {
+            if carry == 0 && c >= rs {
                 break;
             }
             carry += 256 * dst[j] as usize;
             dst[j] = (carry % ALPHABET_SIZE) as u8;
             carry /= ALPHABET_SIZE;
+            c += 1;
         }
+        rs = c;
     }
-    let mut skip: usize = 0;
-    for &v in dst.iter() {
-        if v != 0 {
-            break;
-        }
-        skip += 1;
-    }
-    dst.iter()
-        .skip(skip)
-        .map(|&i| ALPHABET[i as usize])
-        .collect()
+    dst.iter().map(|&i| ALPHABET[i as usize]).collect()
 }
 
 #[derive(Debug)]
 pub enum Error {
-    BadInput { byte: u8 },
+    BadInput { reason: String },
 }
 pub fn decode(src: &[u8]) -> Result<Vec<u8>, Error> {
     if src.is_empty() {
         return Ok(vec![]);
     }
-    let cap = (((ALPHABET_SIZE as f64).log2() * src.len() as f64) / 256f64.log2()).ceil() as usize;
+    if !is_valid_encoding_length(src.len()) {
+        return Err(Error::BadInput {
+            reason: "invalid input length".to_string(),
+        });
+    }
+    let mut rs: usize = 0;
+    let cap = decode_len(src.len());
     let mut dst = vec![0u8; cap];
-    for &b in src.iter() {
+    for b in src.iter().copied() {
+        let mut c: usize = 0;
         let mut carry: usize = ALPHABET_VERT[b as usize] as usize;
         if carry == 255 {
-            return Err(Error::BadInput { byte: b });
+            return Err(Error::BadInput {
+                reason: format!("bad input {}", b),
+            });
         }
         for j in (0..cap).rev() {
-            if carry == 0 {
+            if carry == 0 && c >= rs {
                 break;
             }
             carry += ALPHABET_SIZE * (dst[j] as usize);
             dst[j] = (carry % 256) as u8;
             carry /= 256;
+            c += 1;
         }
+        rs = c;
     }
-    let mut skip: usize = 0;
-    for &v in dst.iter() {
-        if v != 0 {
-            break;
-        }
-        skip += 1;
-    }
-    Ok(dst.iter().skip(skip).map(|&i| i).collect())
+    Ok(dst)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn check_bytes(plain: &[u8], cipher: &[u8]) {
+        assert_eq!(cipher, encode(plain).as_bytes());
+        let result = decode(cipher);
+        assert!(result.is_ok());
+        assert_eq!(plain, result.unwrap());
+    }
+    fn check_str(plaintext: &str, ciphertext: &str) {
+        check_bytes(plaintext.as_bytes(), ciphertext.as_bytes());
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!("", encode("".as_bytes()));
-        assert_eq!("5TP3P3v", encode("Hello".as_bytes()));
-        assert_eq!("T8dgcjRVwXIMmiea", encode("Hello, world".as_bytes()));
-        assert_eq!("73XpUgzMGAjX6SV", encode("Hello中文".as_bytes()));
+    fn test_str() {
+        check_str("", "");
+        check_str("f", "1e");
+        check_str("fo", "6ox");
+        check_str("foo", "0SAPP");
+        check_str("foob", "1sIyuo");
+        check_str("fooba", "7kENWa1");
+        check_str("foobar", "0VytN8Wjy");
+
+        check_str("su", "7gj");
+        check_str("sur", "0VkRe");
+        check_str("sure", "275mAn");
+        check_str("sure.", "8jHquZ4");
+        check_str("asure.", "0UQPPAab8");
+        check_str("easure.", "26h8PlupSA");
+        check_str("leasure.", "9IzLUOIY2fe");
+
+        check_str("Hello, World!", "1wJfrzvdbtXUOlUjUf");
+        check_str("你好，世界！", "1ugmIChyMAcCbDRpROpAtpXdp");
+        check_str("こんにちは", "1fyB0pNlcVqP3tfXZ1FmB");
+        check_str("안녕하십니까", "1yl6dfHPaO9hroEXU9qFioFhM");
+
+        check_str("=", "0z");
+        check_str(">", "10");
+        check_str("?", "11");
+        check_str("11", "3H7");
+        check_str("111", "0DWfh");
+        check_str("1111", "0tquAL");
+        check_str("11111", "3icRuhV");
+        check_str("111111", "0FMElG7cn");
+        check_str(
+            "333333333333333333333333333333333333333",
+            "12crJoybWfE2zqqnxPeYnbDOEcx8Lkv7ksPxzAA8kmM5Yb25Eb6bD",
+        );
+    }
+
+    #[test]
+    fn test_large_text() {
+        // big text
+        let s = "3333333333333".repeat(900);
+        let e = encode(&s.as_bytes());
+        let r = decode(e.as_bytes()).unwrap();
+        assert_eq!(s, String::from_utf8(r).unwrap());
+    }
+
+    #[test]
+    fn test_integer() {
         {
-            let text = decode("5TP3P3v".as_bytes()).unwrap();
-            assert_eq!("Hello", String::from_utf8(text).unwrap());
+            // zero
+            check_bytes(&[], "".as_bytes());
+            check_bytes(&[0], "00".as_bytes());
+            check_bytes(&[0, 0], "000".as_bytes());
+            check_bytes(&[0, 0, 0], "00000".as_bytes());
+            check_bytes(&[0, 0, 0, 0], "000000".as_bytes());
+            check_bytes(&[0; 1025], "0".repeat(1378).as_bytes());
+
+            // leading zero
+            check_bytes(&[1], "01".as_bytes());
+            check_bytes(&[2], "02".as_bytes());
+            check_bytes(&[61], "0z".as_bytes());
+            check_bytes(&[62], "10".as_bytes());
+            check_bytes(&[100], "1c".as_bytes());
+            check_bytes(&[0, 1], "001".as_bytes());
+            check_bytes(&[0, 0, 0, 5], "000005".as_bytes());
+            check_bytes(&[0, 0, 0, 0, 0, 62], "000000010".as_bytes());
         }
         {
-            let text = decode("73XpUgzMGAjX6SV".as_bytes()).unwrap();
-            assert_eq!("Hello中文", String::from_utf8(text).unwrap());
+            let bytes = (u64::MAX).to_be_bytes();
+            check_bytes(&bytes, "LygHa16AHYF".as_bytes());
+
+            let bytes = (u64::MAX as u128 + 1).to_be_bytes(); // exist leading zero
+            check_bytes(&bytes, "00000000000LygHa16AHYG".as_bytes());
         }
         {
-            let text = decode("73XpUgzMGA-jX6SV".as_bytes());
-            assert!(text.is_err());
+            let bytes = (ALPHABET_SIZE as u128).pow(21).to_be_bytes();
+            check_bytes(&bytes, "1000000000000000000000".as_bytes());
+
+            let bytes = (ALPHABET_SIZE as u128).pow(20).to_be_bytes();
+            check_bytes(&bytes, "0100000000000000000000".as_bytes());
+
+            let bytes = 92202686130861137968548313400401640448_u128.to_be_bytes();
+            check_bytes(&bytes, "26tF05fvSIgh0000000000".as_bytes());
         }
+    }
+
+    #[test]
+    fn test_invalid() {
+        assert!(decode(&[1, 2, 3]).is_err());
+        assert!(decode("73XpUgzMGA-jX6SV".as_bytes()).is_err());
     }
 }
