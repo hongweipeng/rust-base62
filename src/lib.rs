@@ -1,4 +1,6 @@
-//  standard 62-encoding, with a 32-byte input block and, a
+//! A simple library base62 encode/decode, no dependencies other libraries.
+
+// standard 62-encoding, with a 32-byte input block and, a
 // 43-byte output block.
 const BASE256BLOCK_LEN: usize = 32;
 const BASE62BLOCK_LEN: usize = 43;
@@ -65,6 +67,7 @@ fn is_valid_encoding_length(n: usize) -> bool {
     f(n) != f(n - 1)
 }
 
+/// Encode `bytes` using the base62, return `String`.
 pub fn encode(src: &[u8]) -> String {
     if src.is_empty() {
         return "".to_string();
@@ -93,6 +96,8 @@ pub fn encode(src: &[u8]) -> String {
 pub enum Error {
     BadInput { reason: String },
 }
+
+/// Decode `bytes` using the base62, return `Result<Vec<u8>, Error>`.
 pub fn decode(src: &[u8]) -> Result<Vec<u8>, Error> {
     if src.is_empty() {
         return Ok(vec![]);
